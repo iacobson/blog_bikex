@@ -1,13 +1,19 @@
 defmodule Bikex do
   require Logger
 
-  alias Mock.{BrakesSupplier, TyresSupplier}
+  alias Mock.{BrakesSupplier, TyresSupplier, PaymentProvider}
 
-  def order_bike([brakes_pid, tyres_pid]) do
+  def order_bike([brakes_pid, tyres_pid, payment_pid]) do
     Sage.new()
     |> Sage.run_async(:brakes, &brakes_transaction/2, &brakes_compensation/4)
     |> Sage.run_async(:tyres, &tyres_transaction/2, &tyres_compensation/4)
-    |> Sage.execute(%{bike_order: self(), brakes_pid: brakes_pid, tyres_pid: tyres_pid})
+    |> Sage.run(:payment, &payment_transaction/2, &payment_compensation/4)
+    |> Sage.execute(%{
+      bike_order: self(),
+      brakes_pid: brakes_pid,
+      tyres_pid: tyres_pid,
+      payment_pid: payment_pid
+    })
   end
 
   defp brakes_transaction(_effects_so_far, %{brakes_pid: brakes_pid}) do
@@ -61,6 +67,23 @@ defmodule Bikex do
   end
 
   defp tyres_compensation(_effect_to_compensate, _effects_so_far, _error, _attrs) do
+    :abort
+  end
+
+  defp payment_transaction(_effects_so_far, %{payment_pid: payment_pid}) do
+    PaymentProvider.pay(payment_pid)
+  end
+
+  defp payment_compensation(
+         _effect_to_compensate,
+         _effects_so_far,
+         {:payment, {:payment, :no_response}},
+         _attrs
+       ) do
+    {:retry, retry_limit: 2}
+  end
+
+  defp payment_compensation(_effect_to_compensate, _effects_so_far, _error, _attrs) do
     :abort
   end
 end

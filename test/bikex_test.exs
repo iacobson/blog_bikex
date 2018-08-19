@@ -1,16 +1,18 @@
 defmodule BikexTest do
   use ExUnit.Case
   use ExUnitProperties
-  alias Mock.{Server, BrakesSupplier, TyresSupplier}
+  alias Mock.{Server, BrakesSupplier, TyresSupplier, PaymentProvider}
 
   @supplier_order_responses [{:ok, :ordered}, {:error, :out_of_stock}, {:error, :no_response}]
   @supplier_cancel_responses [{:ok, :canceled}, {:error, :no_response}]
+  @payment_provider_pay_responses [{:ok, :paid}, {:error, :no_funds}, {:error, :no_response}]
 
   property "check bike ordering saga" do
     check all order_brakes_responses <- generate_responses_list(@supplier_order_responses),
               cancel_brakes_responses <- generate_responses_list(@supplier_cancel_responses),
               order_tyres_responses <- generate_responses_list(@supplier_order_responses),
               cancel_tyres_responses <- generate_responses_list(@supplier_cancel_responses),
+              payment_responses <- generate_responses_list(@payment_provider_pay_responses),
               max_runs: 100_00 do
       {:ok, brakes_pid} =
         Server.start_link(%{order: order_brakes_responses, cancel: cancel_brakes_responses})
@@ -18,7 +20,9 @@ defmodule BikexTest do
       {:ok, tyres_pid} =
         Server.start_link(%{order: order_tyres_responses, cancel: cancel_tyres_responses})
 
-      pids = [brakes_pid, tyres_pid]
+      {:ok, payment_pid} = Server.start_link(%{pay: payment_responses})
+
+      pids = [brakes_pid, tyres_pid, payment_pid]
 
       pids
       |> Bikex.order_bike()
@@ -30,12 +34,14 @@ defmodule BikexTest do
          {:ok, _result,
           %{
             brakes: %BrakesSupplier{brakes_order: brakes_order, state: :ordered},
-            tyres: %TyresSupplier{tyres_order: tyres_order, state: :ordered}
+            tyres: %TyresSupplier{tyres_order: tyres_order, state: :ordered},
+            payment: %PaymentProvider{payment_order: payment_order, state: :paid}
           }},
-         [brakes_pid, tyres_pid]
+         [brakes_pid, tyres_pid, payment_pid]
        ) do
     assert brakes_order == brakes_pid
     assert tyres_order == tyres_pid
+    assert payment_order == payment_pid
   end
 
   defp check_result({:error, _error}, pids) do
@@ -43,7 +49,9 @@ defmodule BikexTest do
       assert Server.get_last_response(pid) in [
                {:error, :no_response},
                {:error, :out_of_stock},
-               {:ok, :canceled}
+               {:ok, :canceled},
+               {:error, :no_funds},
+               :not_called
              ]
     end
   end
