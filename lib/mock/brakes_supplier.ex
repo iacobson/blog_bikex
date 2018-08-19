@@ -10,4 +10,11 @@ defmodule Mock.BrakesSupplier do
       {:error, :no_response} -> {:error, {:brakes, :no_response}}
     end
   end
+
+  def cancel(pid) do
+    case Mock.Server.request(pid, :cancel) do
+      {:ok, :canceled} -> {:ok, %BrakesSupplier{brakes_order: pid, state: :cancelled}}
+      {:error, :no_response} -> {:error, {:brakes, :no_response}}
+    end
+  end
 end
