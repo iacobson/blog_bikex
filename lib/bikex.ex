@@ -1,18 +1,20 @@
 defmodule Bikex do
   require Logger
 
-  alias Mock.{BrakesSupplier, TyresSupplier, PaymentProvider}
+  alias Mock.{BrakesSupplier, TyresSupplier, PaymentProvider, EmailProvider}
 
-  def order_bike([brakes_pid, tyres_pid, payment_pid]) do
+  def order_bike([brakes_pid, tyres_pid, payment_pid, email_pid]) do
     Sage.new()
     |> Sage.run_async(:brakes, &brakes_transaction/2, &brakes_compensation/4)
     |> Sage.run_async(:tyres, &tyres_transaction/2, &tyres_compensation/4)
     |> Sage.run(:payment, &payment_transaction/2, &payment_compensation/4)
+    |> Sage.run(:email, &email_transaction/2, &email_compensation/4)
     |> Sage.execute(%{
       bike_order: self(),
       brakes_pid: brakes_pid,
       tyres_pid: tyres_pid,
-      payment_pid: payment_pid
+      payment_pid: payment_pid,
+      email_pid: email_pid
     })
   end
 
@@ -85,5 +87,19 @@ defmodule Bikex do
 
   defp payment_compensation(_effect_to_compensate, _effects_so_far, _error, _attrs) do
     :abort
+  end
+
+  defp email_transaction(_effects_so_far, %{email_pid: email_pid}) do
+    EmailProvider.send(email_pid)
+  end
+
+  defp email_compensation(_effects_to_compensate, _effects_so_far, _error, %{
+         bike_order: bike_order
+       }) do
+    Logger.error(
+      "Confirmation email failed for bike order: #{inspect(bike_order)}. Manual action required."
+    )
+
+    {:continue, %EmailProvider{ref: nil, state: :not_sent}}
   end
 end
